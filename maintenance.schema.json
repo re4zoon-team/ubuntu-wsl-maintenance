@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/re4zoon-team/ubuntu-wsl-maintenance/maintenance.schema.json",
+  "title": "Company WSL maintenance release",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "tasks"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "description", "enabled", "runAs", "script", "timeoutSeconds", "schedule"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,47}$" },
+          "description": { "type": "string", "maxLength": 160 },
+          "enabled": { "type": "boolean" },
+          "runAs": { "enum": ["root", "user"] },
+          "script": { "type": "string", "pattern": "^scripts/[A-Za-z0-9._/-]+\\.sh$" },
+          "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+          "schedule": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["onBoot", "onCalendar"],
+            "properties": {
+              "onBoot": { "type": "boolean" },
+              "onCalendar": { "type": ["string", "null"], "minLength": 1, "maxLength": 120 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
