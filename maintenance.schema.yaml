@@ -1,0 +1,105 @@
+$schema: 'https://json-schema.org/draft/2020-12/schema'
+$id: 'https://github.com/re4zoon-team/ubuntu-wsl-maintenance/maintenance.schema.yaml'
+title: 'Company WSL maintenance release'
+type: 'object'
+additionalProperties: false
+required:
+  Length: 3
+  LongLength: 3
+  Rank: 1
+  SyncRoot:
+    - 'schemaVersion'
+    - 'version'
+    - 'tasks'
+  IsReadOnly: false
+  IsFixedSize: true
+  IsSynchronized: false
+  Count: 3
+properties:
+  $schema:
+    type: 'string'
+  schemaVersion:
+    const: 1
+  version:
+    type: 'string'
+    pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+  tasks:
+    type: 'array'
+    items:
+      type: 'object'
+      additionalProperties: false
+      required:
+        Length: 7
+        LongLength: 7
+        Rank: 1
+        SyncRoot:
+          - 'id'
+          - 'description'
+          - 'enabled'
+          - 'runAs'
+          - 'script'
+          - 'timeoutSeconds'
+          - 'schedule'
+        IsReadOnly: false
+        IsFixedSize: true
+        IsSynchronized: false
+        Count: 7
+      properties:
+        id:
+          type: 'string'
+          pattern: '^[a-z][a-z0-9-]{1,47}$'
+        description:
+          type: 'string'
+          maxLength: 160
+        enabled:
+          type: 'boolean'
+        runAs:
+          enum:
+            Length: 2
+            LongLength: 2
+            Rank: 1
+            SyncRoot:
+              - 'root'
+              - 'user'
+            IsReadOnly: false
+            IsFixedSize: true
+            IsSynchronized: false
+            Count: 2
+        script:
+          type: 'string'
+          pattern: '^scripts/[A-Za-z0-9._/-]+\.sh$'
+        timeoutSeconds:
+          type: 'integer'
+          minimum: 1
+          maximum: 86400
+        schedule:
+          type: 'object'
+          additionalProperties: false
+          required:
+            Length: 2
+            LongLength: 2
+            Rank: 1
+            SyncRoot:
+              - 'onBoot'
+              - 'onCalendar'
+            IsReadOnly: false
+            IsFixedSize: true
+            IsSynchronized: false
+            Count: 2
+          properties:
+            onBoot:
+              type: 'boolean'
+            onCalendar:
+              type:
+                Length: 2
+                LongLength: 2
+                Rank: 1
+                SyncRoot:
+                  - 'string'
+                  - 'null'
+                IsReadOnly: false
+                IsFixedSize: true
+                IsSynchronized: false
+                Count: 2
+              minLength: 1
+              maxLength: 120

@@ -10,6 +10,6 @@ if ! systemctl is-active --quiet docker.service; then
     exit 0
 fi
 
-# This task is intentionally disabled in maintenance.json until company policy
+# This task is intentionally disabled in maintenance.yaml until company policy
 # approves deletion of unused containers, networks, images, and build cache.
 docker system prune --force --filter 'until=168h'

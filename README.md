@@ -3,7 +3,7 @@
 This public repository is the reviewed maintenance channel for deployed company
 Ubuntu WSL instances. The base image checks it on every WSL boot and every 24
 hours. It selects the highest stable `vMAJOR.MINOR.PATCH` tag, validates
-`maintenance.json` and every referenced Bash script, and generates systemd units
+`maintenance.yaml` and every referenced Bash script, and generates systemd units
 that run explicitly as either `root` or the registered WSL user.
 
 ## Trust boundary
@@ -24,7 +24,7 @@ governance are part of the control boundary.
 
 ## Manifest
 
-`maintenance.json` is the only task registry. Each task declares:
+`maintenance.yaml` is the only task registry. Each task declares:
 
 - a stable lowercase `id`
 - whether it is enabled
@@ -39,11 +39,11 @@ pre-release tags are not ingested.
 ## Publish a release
 
 1. Update scripts and the manifest through a reviewed pull request.
-2. Set `version` in `maintenance.json` to the next SemVer value.
+2. Set `version` in `maintenance.yaml` to the next SemVer value.
 3. Validate locally:
 
    ```bash
-   jq -e . maintenance.json >/dev/null
+   python3 -c "import yaml; yaml.safe_load(open('maintenance.yaml'))"
    bash -n scripts/*.sh
    ```
 
