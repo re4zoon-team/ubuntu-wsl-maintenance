@@ -1,6 +1,6 @@
 $schema: './maintenance.schema.yaml'
 schemaVersion: 1
-version: '0.3.0'
+version: '0.4.0'
 packages:
   -
     id: 'proxy-installer'
@@ -8,7 +8,7 @@ packages:
 tasks:
   -
     id: 'proxy-installer-refresh'
-    description: 'Refresh an existing per-user proxy installation from the reviewed package.'
+    description: 'Refresh and enforce the required per-user proxy installation from the reviewed package.'
     enabled: true
     runAs: 'user'
     script: 'scripts/proxy-installer-refresh.sh'

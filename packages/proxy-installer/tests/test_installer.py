@@ -186,6 +186,11 @@ class Lifecycle(unittest.TestCase):
 
     def test_package_checksums(self):self.inst.verify_package()
 
+    def test_install_requests_sudo_authentication(self):
+        self.inst.fake_system=False
+        self.inst.request_privilege()
+        self.assertEqual(self.fake.calls[-1], ['sudo', '-v'])
+
     def test_refresh_preserves_settings_and_restarts_services(self):
         self.inst.install(packages=False,checked=True)
         config=self.inst.root/'config/proxy.yaml'

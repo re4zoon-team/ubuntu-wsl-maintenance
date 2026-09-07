@@ -67,6 +67,11 @@ class Installer:
             cmd = ['sudo', '-n'] + cmd
         return self.run(cmd, check=check, capture_output=True)
 
+    def request_privilege(self):
+        if not self.fake_system:
+            print('Administrator access is required for the managed system integrations.')
+            self.run(['sudo', '-v'])
+
     def service_state(self, name, user=True):
         enabled = self.ctl('is-enabled', name, user=user, check=False).stdout.strip()
         active = self.ctl('is-active', name, user=user, check=False).stdout.strip() == 'active'
@@ -207,6 +212,7 @@ class Installer:
                 print('Already managed by this installer. Run proxy status; uninstall before installing another package version.')
                 return
             raise RuntimeError('A previous installation journal exists; run uninstall first or inspect ' + str(self.state))
+        self.request_privilege()
         self.state.mkdir(parents=True, mode=0o700, exist_ok=True)
         self.state.chmod(0o700)
         self.manifest = {'version': VERSION, 'status': 'installing', 'home': str(self.home), 'root': str(self.root), 'files': [],

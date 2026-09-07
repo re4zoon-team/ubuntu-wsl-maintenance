@@ -42,7 +42,8 @@ The `packages` section permits reviewed, symlink-free file trees below
 WSL user. Refreshing preserves the developer's selected upstream proxy settings
 and performs an atomic rollback if the updated controller fails its checks. If
 onboarding has not installed the proxy yet, the refresh exits successfully and
-defers to onboarding.
+defers to the mandatory onboarding step. Once onboarding is complete, a missing
+proxy installation is an error and the task reports the repair command.
 
 ## Publish a release
 
@@ -58,8 +59,8 @@ defers to onboarding.
 4. Merge the reviewed commit and create an immutable matching tag:
 
    ```bash
-   git tag -a v0.3.0 -m "WSL maintenance v0.3.0"
-   git push origin v0.3.0
+   git tag -a v0.4.0 -m "WSL maintenance v0.4.0"
+   git push origin v0.4.0
    ```
 
 Deployed clients never downgrade and never refetch a version they have already

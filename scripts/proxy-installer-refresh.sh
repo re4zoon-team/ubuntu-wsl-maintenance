@@ -12,4 +12,12 @@ package=/opt/company-maintenance/current/packages/proxy-installer
     exit 1
 }
 
+onboarding_marker=${XDG_STATE_HOME:-"$HOME/.local/state"}/company-dev-image/onboarding.done
+proxy_manifest=$HOME/.local/state/wsl-proxy-installer/manifest.json
+if [[ -e $onboarding_marker && ! -f $proxy_manifest ]]; then
+    echo 'Required proxy installation is missing after developer onboarding completed.' >&2
+    echo "Repair it with: /opt/company/proxy-installer/install.sh" >&2
+    exit 1
+fi
+
 exec /usr/bin/python3 "$package/installer.py" refresh
