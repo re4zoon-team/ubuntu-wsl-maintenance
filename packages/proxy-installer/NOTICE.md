@@ -1,0 +1,1 @@
+This folder contains the WSL proxy controller, configuration, tests and documentation. Ubuntu runtime packages are installed separately through APT and retain their upstream licenses. No certificates, TLS compatibility helpers, credentials, private keys or application-session logs are bundled.

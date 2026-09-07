@@ -4,17 +4,9 @@ title: 'Company WSL maintenance release'
 type: 'object'
 additionalProperties: false
 required:
-  Length: 3
-  LongLength: 3
-  Rank: 1
-  SyncRoot:
-    - 'schemaVersion'
-    - 'version'
-    - 'tasks'
-  IsReadOnly: false
-  IsFixedSize: true
-  IsSynchronized: false
-  Count: 3
+  - 'schemaVersion'
+  - 'version'
+  - 'tasks'
 properties:
   $schema:
     type: 'string'
@@ -23,27 +15,35 @@ properties:
   version:
     type: 'string'
     pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+  packages:
+    type: 'array'
+    uniqueItems: true
+    items:
+      type: 'object'
+      additionalProperties: false
+      required:
+        - 'id'
+        - 'path'
+      properties:
+        id:
+          type: 'string'
+          pattern: '^[a-z][a-z0-9-]{1,47}$'
+        path:
+          type: 'string'
+          pattern: '^packages/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
   tasks:
     type: 'array'
     items:
       type: 'object'
       additionalProperties: false
       required:
-        Length: 7
-        LongLength: 7
-        Rank: 1
-        SyncRoot:
-          - 'id'
-          - 'description'
-          - 'enabled'
-          - 'runAs'
-          - 'script'
-          - 'timeoutSeconds'
-          - 'schedule'
-        IsReadOnly: false
-        IsFixedSize: true
-        IsSynchronized: false
-        Count: 7
+        - 'id'
+        - 'description'
+        - 'enabled'
+        - 'runAs'
+        - 'script'
+        - 'timeoutSeconds'
+        - 'schedule'
       properties:
         id:
           type: 'string'
@@ -55,16 +55,8 @@ properties:
           type: 'boolean'
         runAs:
           enum:
-            Length: 2
-            LongLength: 2
-            Rank: 1
-            SyncRoot:
-              - 'root'
-              - 'user'
-            IsReadOnly: false
-            IsFixedSize: true
-            IsSynchronized: false
-            Count: 2
+            - 'root'
+            - 'user'
         script:
           type: 'string'
           pattern: '^scripts/[A-Za-z0-9._/-]+\.sh$'
@@ -76,30 +68,14 @@ properties:
           type: 'object'
           additionalProperties: false
           required:
-            Length: 2
-            LongLength: 2
-            Rank: 1
-            SyncRoot:
-              - 'onBoot'
-              - 'onCalendar'
-            IsReadOnly: false
-            IsFixedSize: true
-            IsSynchronized: false
-            Count: 2
+            - 'onBoot'
+            - 'onCalendar'
           properties:
             onBoot:
               type: 'boolean'
             onCalendar:
               type:
-                Length: 2
-                LongLength: 2
-                Rank: 1
-                SyncRoot:
-                  - 'string'
-                  - 'null'
-                IsReadOnly: false
-                IsFixedSize: true
-                IsSynchronized: false
-                Count: 2
+                - 'string'
+                - 'null'
               minLength: 1
               maxLength: 120

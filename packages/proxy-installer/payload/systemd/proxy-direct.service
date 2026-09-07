@@ -1,0 +1,14 @@
+[Unit]
+Description=Direct-only Tinyproxy backend
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/tinyproxy -d -c @HOME@/.local/share/wsl-proxy/config/tinyproxy-direct.conf
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,599 @@
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+proxy_root="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+
+configured_upstream="$(/usr/bin/python3 "$proxy_root/lib/settings.py" "$proxy_root/config/proxy.yaml")" || exit 1
+read -r configured_host configured_port <<< "$configured_upstream"
+proxy_host="${PROXY_HOST:-$configured_host}"
+proxy_port="${PROXY_PORT:-$configured_port}"
+proxy_state="${PROXY_STATE:-$HOME/.cache/.proxy-state}"
+proxy_pending="${proxy_state}.pending"
+proxy_lock="${proxy_state}.lock"
+proxy_haproxy_config="${PROXY_HAPROXY_CONFIG:-$HOME/.config/haproxy/proxy.cfg}"
+proxy_endpoint_service="${PROXY_ENDPOINT_SERVICE:-proxy-endpoint.service}"
+proxy_systemctl="${PROXY_SYSTEMCTL:-/usr/bin/systemctl}"
+proxy_listener_wakeup="${PROXY_LISTENER_WAKEUP:-}"
+proxy_host_endpoint="${PROXY_HOST_ENDPOINT:-http://127.0.0.1:18080}"
+proxy_docker_endpoint="${PROXY_DOCKER_ENDPOINT:-http://192.168.20.5:18080}"
+proxy_ca_bundle="${PROXY_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}"
+proxy_success_threshold="${PROXY_SUCCESS_THRESHOLD:-2}"
+proxy_failure_threshold="${PROXY_FAILURE_THRESHOLD:-3}"
+proxy_crash_hook="${PROXY_CRASH_HOOK:-}"
+proxy_no_proxy="${PROXY_NO_PROXY:-localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.nav.gov.hu}"
+
+[[ "$proxy_success_threshold" =~ ^[1-9][0-9]*$ ]] || proxy_success_threshold=2
+[[ "$proxy_failure_threshold" =~ ^[1-9][0-9]*$ ]] || proxy_failure_threshold=3
+
+state_mode=auto
+state_detected=unknown
+state_effective=off
+state_successes=0
+state_failures=0
+pending_valid=0
+pending_target=''
+pending_mode=''
+pending_detected=''
+pending_successes=0
+pending_failures=0
+
+ensure_parent() {
+  mkdir -p -- "$(dirname -- "$1")"
+}
+
+atomic_text() {
+  local path="$1" content="$2"
+
+  /usr/bin/python3 - "$path" "$content" <<'PY'
+import os
+import stat
+import sys
+import tempfile
+
+path, content = sys.argv[1:]
+directory = os.path.dirname(path) or "."
+mode = 0o600
+if os.path.lexists(path):
+    existing = os.lstat(path)
+    if not stat.S_ISREG(existing.st_mode):
+        raise SystemExit("refusing to replace a non-regular file")
+    mode = stat.S_IMODE(existing.st_mode)
+
+descriptor, temporary = tempfile.mkstemp(prefix=".%s." % os.path.basename(path), dir=directory)
+try:
+    os.fchmod(descriptor, mode)
+    with os.fdopen(descriptor, "wb", closefd=True) as handle:
+        handle.write((content + "\n").encode("utf-8"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+    directory_descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+except BaseException:
+    try:
+        os.unlink(temporary)
+    except FileNotFoundError:
+        pass
+    raise
+PY
+}
+
+remove_file() {
+  local path="$1"
+
+  /usr/bin/python3 - "$path" <<'PY'
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+if not os.path.lexists(path):
+    raise SystemExit(0)
+if not stat.S_ISREG(os.lstat(path).st_mode):
+    raise SystemExit("refusing to remove a non-regular file")
+os.unlink(path)
+directory = os.path.dirname(path) or "."
+descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
+write_if_changed() {
+  local path="$1" content="$2" current=''
+
+  if [[ -e "$path" || -L "$path" ]]; then
+    [[ -f "$path" && ! -L "$path" ]] || return 1
+    current=$(<"$path")
+  fi
+  [[ "$current" == "$content" ]] || atomic_text "$path" "$content"
+}
+
+build_exports() {
+  printf -v export_ca 'export REQUESTS_CA_BUNDLE=%q' "$proxy_ca_bundle"
+  printf -v export_ssl 'export SSL_CERT_FILE=%q' "$proxy_ca_bundle"
+  printf -v export_http 'export HTTP_PROXY=%q' "$proxy_host_endpoint"
+  printf -v export_https 'export HTTPS_PROXY=%q' "$proxy_host_endpoint"
+  printf -v export_http_lower 'export http_proxy=%q' "$proxy_host_endpoint"
+  printf -v export_https_lower 'export https_proxy=%q' "$proxy_host_endpoint"
+  printf -v export_no_proxy 'export NO_PROXY=%q' "$proxy_no_proxy"
+  printf -v export_no_proxy_lower 'export no_proxy=%q' "$proxy_no_proxy"
+}
+
+state_exports() {
+  build_exports
+  printf '%s\n' "$export_ca" "$export_ssl" "$export_http" "$export_https"
+  printf '%s\n' "$export_http_lower" "$export_https_lower"
+  printf '%s\n' "$export_no_proxy" "$export_no_proxy_lower"
+}
+
+load_state() {
+  local line success_value failure_value
+  local seen_mode=0 seen_detected=0 seen_effective=0 seen_successes=0 seen_failures=0
+  local seen_ca=0 seen_ssl=0 seen_http=0 seen_https=0 seen_http_lower=0 seen_https_lower=0
+  local seen_no_proxy=0 seen_no_proxy_lower=0 seen_legacy_unset=0
+
+  state_mode=auto
+  state_detected=unknown
+  state_effective=off
+  state_successes=0
+  state_failures=0
+  [[ ! -e "$proxy_state" && ! -L "$proxy_state" ]] && return 0
+  [[ -f "$proxy_state" && ! -L "$proxy_state" ]] || return 1
+  build_exports
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      PROXY_MODE=auto|PROXY_MODE=force-on|PROXY_MODE=force-off)
+        (( ! seen_mode )) || return 1
+        state_mode="${line#PROXY_MODE=}"
+        seen_mode=1
+        ;;
+      PROXY_DETECTED=on|PROXY_DETECTED=off|PROXY_DETECTED=unknown)
+        (( ! seen_detected )) || return 1
+        state_detected="${line#PROXY_DETECTED=}"
+        seen_detected=1
+        ;;
+      PROXY_EFFECTIVE=on|PROXY_EFFECTIVE=off)
+        (( ! seen_effective )) || return 1
+        state_effective="${line#PROXY_EFFECTIVE=}"
+        seen_effective=1
+        ;;
+      PROXY_SUCCESS_COUNT=*)
+        (( ! seen_successes )) || return 1
+        success_value="${line#PROXY_SUCCESS_COUNT=}"
+        [[ "$success_value" =~ ^[0-9]+$ ]] || return 1
+        state_successes="$success_value"
+        seen_successes=1
+        ;;
+      PROXY_FAILURE_COUNT=*)
+        (( ! seen_failures )) || return 1
+        failure_value="${line#PROXY_FAILURE_COUNT=}"
+        [[ "$failure_value" =~ ^[0-9]+$ ]] || return 1
+        state_failures="$failure_value"
+        seen_failures=1
+        ;;
+      "$export_ca") (( ! seen_ca )) || return 1; seen_ca=1 ;;
+      "$export_ssl") (( ! seen_ssl )) || return 1; seen_ssl=1 ;;
+      "$export_http") (( ! seen_http )) || return 1; seen_http=1 ;;
+      "$export_https") (( ! seen_https )) || return 1; seen_https=1 ;;
+      "$export_http_lower") (( ! seen_http_lower )) || return 1; seen_http_lower=1 ;;
+      "$export_https_lower") (( ! seen_https_lower )) || return 1; seen_https_lower=1 ;;
+      "$export_no_proxy") (( ! seen_no_proxy )) || return 1; seen_no_proxy=1 ;;
+      "$export_no_proxy_lower") (( ! seen_no_proxy_lower )) || return 1; seen_no_proxy_lower=1 ;;
+      'unset REQUESTS_CA_BUNDLE SSL_CERT_FILE HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy')
+        (( ! seen_legacy_unset )) || return 1
+        seen_legacy_unset=1
+        ;;
+      *) return 1 ;;
+    esac
+  done < "$proxy_state"
+
+  (( seen_mode && seen_detected && seen_effective && seen_successes && seen_failures )) || return 1
+  if (( seen_ca || seen_ssl || seen_http || seen_https || seen_http_lower || seen_https_lower || seen_no_proxy || seen_no_proxy_lower )); then
+    (( seen_ca && seen_ssl && seen_http && seen_https && seen_http_lower && seen_https_lower && seen_no_proxy && seen_no_proxy_lower && ! seen_legacy_unset )) || return 1
+  else
+    [[ "$state_effective" == off && "$seen_legacy_unset" == 1 ]] || return 1
+  fi
+}
+
+state_document() {
+  printf 'PROXY_MODE=%s\n' "$state_mode"
+  printf 'PROXY_DETECTED=%s\n' "$state_detected"
+  printf 'PROXY_EFFECTIVE=%s\n' "$state_effective"
+  printf 'PROXY_SUCCESS_COUNT=%s\n' "$state_successes"
+  printf 'PROXY_FAILURE_COUNT=%s\n' "$state_failures"
+  state_exports
+}
+
+load_pending() {
+  local line success_value failure_value
+  local seen_target=0 seen_mode=0 seen_detected=0 seen_successes=0 seen_failures=0
+
+  pending_valid=0
+  pending_target=''
+  pending_mode=''
+  pending_detected=''
+  pending_successes=0
+  pending_failures=0
+  [[ ! -e "$proxy_pending" && ! -L "$proxy_pending" ]] && return 0
+  [[ -f "$proxy_pending" && ! -L "$proxy_pending" ]] || return 1
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      PROXY_TARGET=on|PROXY_TARGET=off)
+        (( ! seen_target )) || return 1
+        pending_target="${line#PROXY_TARGET=}"
+        seen_target=1
+        ;;
+      PROXY_MODE=auto|PROXY_MODE=force-on|PROXY_MODE=force-off)
+        (( ! seen_mode )) || return 1
+        pending_mode="${line#PROXY_MODE=}"
+        seen_mode=1
+        ;;
+      PROXY_DETECTED=on|PROXY_DETECTED=off|PROXY_DETECTED=unknown)
+        (( ! seen_detected )) || return 1
+        pending_detected="${line#PROXY_DETECTED=}"
+        seen_detected=1
+        ;;
+      PROXY_SUCCESS_COUNT=*)
+        (( ! seen_successes )) || return 1
+        success_value="${line#PROXY_SUCCESS_COUNT=}"
+        [[ "$success_value" =~ ^[0-9]+$ ]] || return 1
+        pending_successes="$success_value"
+        seen_successes=1
+        ;;
+      PROXY_FAILURE_COUNT=*)
+        (( ! seen_failures )) || return 1
+        failure_value="${line#PROXY_FAILURE_COUNT=}"
+        [[ "$failure_value" =~ ^[0-9]+$ ]] || return 1
+        pending_failures="$failure_value"
+        seen_failures=1
+        ;;
+      *) return 1 ;;
+    esac
+  done < "$proxy_pending"
+
+  (( seen_target && seen_mode && seen_detected && seen_successes && seen_failures )) || return 1
+  case "$pending_mode:$pending_target" in
+    auto:on|auto:off|force-on:on|force-off:off) ;;
+    *) return 1 ;;
+  esac
+  pending_valid=1
+}
+
+pending_document() {
+  local target="$1" mode="$2" detected="$3" successes="$4" failures="$5"
+
+  printf 'PROXY_TARGET=%s\n' "$target"
+  printf 'PROXY_MODE=%s\n' "$mode"
+  printf 'PROXY_DETECTED=%s\n' "$detected"
+  printf 'PROXY_SUCCESS_COUNT=%s\n' "$successes"
+  printf 'PROXY_FAILURE_COUNT=%s\n' "$failures"
+}
+
+validate_upstream() {
+  [[ "$proxy_host" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || return 1
+  [[ "$proxy_host" != *..* && "$proxy_host" != .* && "$proxy_host" != *- ]] || return 1
+  [[ "$proxy_port" =~ ^[0-9]{1,5}$ ]] || return 1
+  (( 10#$proxy_port >= 1 && 10#$proxy_port <= 65535 ))
+}
+
+render_config() {
+  local target="$1"
+  validate_upstream || return 1
+  cat <<'EOF'
+global
+  nbthread 1
+  maxconn 512
+  log stdout format raw local0 notice
+defaults
+  mode tcp
+  log global
+  timeout connect 5s
+  timeout client 1h
+  timeout server 1h
+  timeout client-fin 30s
+  timeout server-fin 30s
+resolvers wsl
+  parse-resolv-conf
+  resolve_retries 3
+  timeout resolve 1s
+  timeout retry 1s
+  hold valid 10s
+frontend local_proxy
+  bind 127.0.0.1:18080
+  bind 192.168.20.5:18080
+  acl allowed_client src 127.0.0.1/32 192.168.20.0/24 172.30.0.0/24
+  tcp-request connection reject if !allowed_client
+  default_backend selected_route
+backend selected_route
+EOF
+  if [[ "$target" == on ]]; then
+    printf '  server corporate %s:%s resolvers wsl resolve-prefer ipv4 init-addr libc,none\n' "$proxy_host" "$proxy_port"
+  else
+    printf '%s\n' '  server direct 127.0.0.1:18081'
+  fi
+}
+
+config_matches() {
+  local target="$1" candidate current=''
+
+  candidate="$(render_config "$target")" || return 1
+  [[ -f "$proxy_haproxy_config" && ! -L "$proxy_haproxy_config" ]] || return 1
+  current=$(<"$proxy_haproxy_config")
+  [[ "$current" == "$candidate" ]]
+}
+
+main_pid() {
+  local pid
+
+  pid="$($proxy_systemctl --user show --property=MainPID --value "$proxy_endpoint_service")" || return 1
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  printf '%s\n' "$pid"
+}
+
+wake_listener() {
+  if [[ -n "$proxy_listener_wakeup" ]]; then
+    "$proxy_listener_wakeup" "$proxy_host_endpoint"
+  else
+    "${PROXY_NC:-nc}" -z -w 2 127.0.0.1 18080 >/dev/null 2>&1
+  fi
+}
+
+reload_candidate() {
+  local before_pid after_pid
+  before_pid="$(main_pid)" || return 1
+  # ExecReload validates the config and waits for HAProxy's Success=1 response.
+  "$proxy_systemctl" --user reload "$proxy_endpoint_service" || return 1
+  after_pid="$(main_pid)" || return 1
+  [[ "$before_pid" == "$after_pid" ]] || return 1
+  wake_listener
+}
+
+reassert_canonical_route() {
+  local canonical="$1" candidate
+
+  candidate="$(render_config "$canonical")" || return 1
+  ensure_parent "$proxy_haproxy_config" || return 1
+  write_if_changed "$proxy_haproxy_config" "$candidate" || return 1
+  if ! reload_candidate; then
+    "$proxy_systemctl" --user restart --no-block "$proxy_endpoint_service"
+  fi
+}
+
+apply_route() {
+  local target="$1" mode="$2" detected="$3" successes="$4" failures="$5"
+  local canonical_target="$state_effective" candidate pending
+
+  candidate="$(render_config "$target")" || return 1
+  pending="$(pending_document "$target" "$mode" "$detected" "$successes" "$failures")"
+  ensure_parent "$proxy_pending" || return 1
+  atomic_text "$proxy_pending" "$pending" || return 1
+  if [[ -n "$proxy_crash_hook" ]]; then
+    "$proxy_crash_hook" after-pending || return 1
+  fi
+  ensure_parent "$proxy_haproxy_config" || return 1
+  if ! write_if_changed "$proxy_haproxy_config" "$candidate" || ! reload_candidate; then
+    reassert_canonical_route "$canonical_target" || true
+    return 1
+  fi
+
+  state_mode="$mode"
+  state_detected="$detected"
+  state_effective="$target"
+  state_successes="$successes"
+  state_failures="$failures"
+  if ! ensure_parent "$proxy_state" || ! write_if_changed "$proxy_state" "$(state_document)"; then
+    reassert_canonical_route "$canonical_target" || true
+    return 1
+  fi
+  remove_file "$proxy_pending"
+}
+
+commit_without_route_change() {
+  local mode="$1" detected="$2" target="$3" successes="$4" failures="$5"
+
+  state_mode="$mode"
+  state_detected="$detected"
+  state_effective="$target"
+  state_successes="$successes"
+  state_failures="$failures"
+  ensure_parent "$proxy_state" || return 1
+  write_if_changed "$proxy_state" "$(state_document)"
+}
+
+select_route() {
+  local target="$1" mode="$2" detected="$3" successes="$4" failures="$5"
+
+  if [[ "$target" == "$state_effective" ]] && config_matches "$target"; then
+    commit_without_route_change "$mode" "$detected" "$target" "$successes" "$failures"
+  else
+    apply_route "$target" "$mode" "$detected" "$successes" "$failures"
+  fi
+}
+
+set_manual_mode() {
+  local target="$1"
+
+  load_state || return 1
+  load_pending || return 1
+  if (( pending_valid )); then
+    remove_file "$proxy_pending" || return 1
+  fi
+  select_route "$target" "force-$target" "$state_detected" "$state_successes" "$state_failures"
+}
+
+set_auto_mode() {
+  load_state || return 1
+  load_pending || return 1
+  if ! config_matches "$state_effective"; then
+    reassert_canonical_route "$state_effective" || return 1
+  fi
+  if (( pending_valid )); then
+    remove_file "$proxy_pending" || return 1
+  fi
+  commit_without_route_change auto "$state_detected" "$state_effective" "$state_successes" "$state_failures"
+}
+
+toggle_mode() {
+  local target
+
+  load_state || return 1
+  load_pending || return 1
+  if [[ "$state_effective" == on ]]; then target=off; else target=on; fi
+  select_route "$target" "force-$target" "$state_detected" "$state_successes" "$state_failures"
+}
+
+probe_proxy() {
+  "${PROXY_NC:-nc}" -z -w 2 "$proxy_host" "$proxy_port" >/dev/null 2>&1
+}
+
+check_once() {
+  local desired_detected desired_effective desired_successes desired_failures
+
+  load_state || return 1
+  load_pending || return 1
+  if (( pending_valid )); then
+    apply_route "$pending_target" "$pending_mode" "$pending_detected" "$pending_successes" "$pending_failures"
+    return
+  fi
+  desired_successes="$state_successes"
+  desired_failures="$state_failures"
+  desired_detected="$state_detected"
+  if probe_proxy; then
+    (( desired_successes < proxy_success_threshold )) && desired_successes=$((desired_successes + 1))
+    desired_failures=0
+    (( desired_successes >= proxy_success_threshold )) && desired_detected=on
+  else
+    (( desired_failures < proxy_failure_threshold )) && desired_failures=$((desired_failures + 1))
+    desired_successes=0
+    (( desired_failures >= proxy_failure_threshold )) && desired_detected=off
+  fi
+  desired_effective="$state_effective"
+  if [[ "$state_mode" == auto && "$desired_detected" != unknown ]]; then
+    desired_effective="$desired_detected"
+  fi
+  select_route "$desired_effective" "$state_mode" "$desired_detected" "$desired_successes" "$desired_failures"
+}
+
+regenerate_config() {
+  local candidate
+
+  load_state || return 1
+  candidate="$(render_config "$state_effective")" || return 1
+  ensure_parent "$proxy_haproxy_config" || return 1
+  write_if_changed "$proxy_haproxy_config" "$candidate"
+}
+
+pending_status() {
+  load_pending || { printf 'invalid\n'; return 1; }
+  if (( pending_valid )); then printf '%s\n' "$pending_target"; else printf 'none\n'; fi
+}
+
+service_status() {
+  local status
+
+  status="$($proxy_systemctl --user is-active "$proxy_endpoint_service" 2>/dev/null)" || status="${status:-unavailable}"
+  printf '%s\n' "$status"
+}
+
+report_status() {
+  local pending
+
+  load_state || return 1
+  pending="$(pending_status)" || return 1
+  printf 'mode: %s\n' "$state_mode"
+  printf 'detected: %s\n' "$state_detected"
+  printf 'route: %s\n' "$state_effective"
+  printf 'effective: %s\n' "$state_effective"
+  printf 'successes: %s\n' "$state_successes"
+  printf 'failures: %s\n' "$state_failures"
+  printf 'pending: %s\n' "$pending"
+  printf 'service: %s\n' "$(service_status)"
+  printf 'host-endpoint: %s\n' "$proxy_host_endpoint"
+  printf 'docker-endpoint: %s\n' "$proxy_docker_endpoint"
+  printf 'ca-bundle: %s\n' "$proxy_ca_bundle"
+}
+
+monitor_proxy() {
+  local interval="${PROXY_MONITOR_INTERVAL:-5}"
+
+  [[ "$interval" =~ ^[1-9][0-9]*$ ]] || interval=5
+  while true; do
+    with_lock check_once || printf '[proxy] check failed; pending state will be retried\n' >&2
+    sleep "$interval"
+  done
+}
+
+with_lock() {
+  ensure_parent "$proxy_lock" || return 1
+  flock -x "$proxy_lock" /usr/bin/bash "$0" __proxy_locked "$@"
+}
+
+usage() {
+  cat <<'EOF'
+Usage: proxy <command>
+
+Commands:
+  init           Compatibility no-op
+  monitor        Run the foreground health monitor
+  check          Run one TCP health check
+  on             Persist and apply force-on mode
+  off            Persist and apply force-off mode
+  auto           Persist automatic mode without probing
+  toggle         Persistently invert the effective state
+  render-config  Regenerate HAProxy config from canonical state
+  status         Show proxy route and user-service state
+  stop           Stop only the monitor (proxy endpoints stay running)
+  start          Start the monitor
+  test           Run isolated controller regressions
+  verify [on|off] Run live application acceptance checks
+  state-file     Print the shell state path
+EOF
+}
+
+if [[ "${1:-}" == __proxy_locked ]]; then
+  case "${2:-}" in
+    set_manual_mode) set_manual_mode "${3:-}" ;;
+    set_auto_mode) set_auto_mode ;;
+    toggle_mode) toggle_mode ;;
+    check_once) check_once ;;
+    regenerate_config) regenerate_config ;;
+    *) exit 2 ;;
+  esac
+  exit $?
+fi
+
+command="${1:-status}"
+
+case "$command" in
+  init) : ;;
+  monitor) monitor_proxy ;;
+  check) with_lock check_once ;;
+  on) with_lock set_manual_mode on ;;
+  off) with_lock set_manual_mode off ;;
+  auto) with_lock set_auto_mode ;;
+  toggle) with_lock toggle_mode ;;
+  render-config) with_lock regenerate_config ;;
+  status) report_status ;;
+  stop|kill) exec "$proxy_systemctl" --user stop proxy-monitor.service ;;
+  start) exec "$proxy_systemctl" --user start proxy-monitor.service ;;
+  test) exec /usr/bin/bash "$proxy_root/tests/controller.sh" "${@:2}" ;;
+  verify|__reload-haproxy)
+    exec /usr/bin/python3 "$proxy_root/lib/operations.py" "$command" "${@:2}"
+    ;;
+  state-file) printf '%s\n' "$proxy_state" ;;
+  help|--help|-h) usage ;;
+  *)
+    printf 'Unknown proxy command: %s\n' "$command" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

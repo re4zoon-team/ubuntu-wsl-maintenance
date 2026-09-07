@@ -24,7 +24,7 @@ governance are part of the control boundary.
 
 ## Manifest
 
-`maintenance.yaml` is the only task registry. Each task declares:
+`maintenance.yaml` is the task and package registry. Each task declares:
 
 - a stable lowercase `id`
 - whether it is enabled
@@ -35,6 +35,14 @@ governance are part of the control boundary.
 
 Raw cron files, arbitrary unit files, symlinks, commands outside `scripts/`, and
 pre-release tags are not ingested.
+
+The `packages` section permits reviewed, symlink-free file trees below
+`packages/` to travel with the same immutable SemVer release. The bundled
+`proxy-installer` package is refreshed once per boot and daily as the registered
+WSL user. Refreshing preserves the developer's selected upstream proxy settings
+and performs an atomic rollback if the updated controller fails its checks. If
+onboarding has not installed the proxy yet, the refresh exits successfully and
+defers to onboarding.
 
 ## Publish a release
 
@@ -50,8 +58,8 @@ pre-release tags are not ingested.
 4. Merge the reviewed commit and create an immutable matching tag:
 
    ```bash
-   git tag -a v0.2.0 -m "WSL maintenance v0.2.0"
-   git push origin v0.2.0
+   git tag -a v0.3.0 -m "WSL maintenance v0.3.0"
+   git push origin v0.3.0
    ```
 
 Deployed clients never downgrade and never refetch a version they have already

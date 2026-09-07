@@ -1,0 +1,22 @@
+[Unit]
+Description=Stable HAProxy TCP proxy endpoint
+Wants=proxy-direct.service
+After=proxy-direct.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+WorkingDirectory=@HOME@
+RuntimeDirectory=proxy-endpoint
+RuntimeDirectoryMode=0700
+ExecStartPre=@HOME@/.local/share/wsl-proxy/proxy render-config
+ExecStart=/usr/sbin/haproxy -Ws -f @HOME@/.config/haproxy/proxy.cfg -S %t/proxy-endpoint/master.sock,mode,600,level,admin
+ExecReload=@HOME@/.local/share/wsl-proxy/proxy __reload-haproxy @HOME@/.config/haproxy/proxy.cfg %t/proxy-endpoint/master.sock
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=30s
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

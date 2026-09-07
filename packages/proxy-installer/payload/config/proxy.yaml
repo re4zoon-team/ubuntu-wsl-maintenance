@@ -1,0 +1,2 @@
+upstream_host: 'fortiproxy.intranet.nav.gov.hu'
+upstream_port: 8080

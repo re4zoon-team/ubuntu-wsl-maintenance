@@ -1,7 +1,21 @@
 $schema: './maintenance.schema.yaml'
 schemaVersion: 1
-version: '0.2.0'
+version: '0.3.0'
+packages:
+  -
+    id: 'proxy-installer'
+    path: 'packages/proxy-installer'
 tasks:
+  -
+    id: 'proxy-installer-refresh'
+    description: 'Refresh an existing per-user proxy installation from the reviewed package.'
+    enabled: true
+    runAs: 'user'
+    script: 'scripts/proxy-installer-refresh.sh'
+    timeoutSeconds: 600
+    schedule:
+      onBoot: true
+      onCalendar: 'daily'
   -
     id: 'health-report'
     description: 'Record a compact developer tool and WSL health report.'

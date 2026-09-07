@@ -1,0 +1,17 @@
+[Unit]
+Description=VPN-aware proxy monitor
+After=proxy-endpoint.service
+Wants=proxy-endpoint.service
+
+[Service]
+Type=simple
+WorkingDirectory=@HOME@
+ExecStart=@HOME@/.local/share/wsl-proxy/proxy monitor
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=proxy-monitor
+
+[Install]
+WantedBy=default.target
