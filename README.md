@@ -38,12 +38,14 @@ pre-release tags are not ingested.
 
 The `packages` section permits reviewed, symlink-free file trees below
 `packages/` to travel with the same immutable SemVer release. The bundled
-`proxy-installer` package is refreshed once per boot and daily as the registered
+`proxy-runtime` package is refreshed once per boot and daily as the registered
 WSL user. Refreshing preserves the developer's selected upstream proxy settings
 and performs an atomic rollback if the updated controller fails its checks. If
 onboarding has not installed the proxy yet, the refresh exits successfully and
 defers to the mandatory onboarding step. Once onboarding is complete, a missing
-proxy installation is an error and the task reports the repair command.
+proxy installation is an error. This repository ships no installer or uninstaller;
+the dedicated runtime refresher preserves settings and rolls back failed updates.
+The controller self-test remains because updates run it before activation.
 
 ## Publish a release
 
@@ -59,8 +61,8 @@ proxy installation is an error and the task reports the repair command.
 4. Merge the reviewed commit and create an immutable matching tag:
 
    ```bash
-   git tag -a v0.4.0 -m "WSL maintenance v0.4.0"
-   git push origin v0.4.0
+   git tag -a v0.5.0 -m "WSL maintenance v0.5.0"
+   git push origin v0.5.0
    ```
 
 Deployed clients never downgrade and never refetch a version they have already

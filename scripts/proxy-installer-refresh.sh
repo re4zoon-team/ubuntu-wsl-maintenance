@@ -6,8 +6,8 @@ if [[ $(id -u) -eq 0 ]]; then
     exit 1
 fi
 
-package=/opt/company-maintenance/current/packages/proxy-installer
-[[ -f $package/installer.py && ! -L $package/installer.py ]] || {
+package=/opt/company-maintenance/current/packages/proxy-runtime
+[[ -f $package/proxy && ! -L $package/proxy ]] || {
     echo "The reviewed proxy installer package is unavailable: $package" >&2
     exit 1
 }
@@ -16,8 +16,8 @@ onboarding_marker=${XDG_STATE_HOME:-"$HOME/.local/state"}/company-dev-image/onbo
 proxy_manifest=$HOME/.local/state/wsl-proxy-installer/manifest.json
 if [[ -e $onboarding_marker && ! -f $proxy_manifest ]]; then
     echo 'Required proxy installation is missing after developer onboarding completed.' >&2
-    echo "Repair it with: /opt/company/proxy-installer/install.sh" >&2
+    echo 'Contact the image maintainer to restore the required proxy installation.' >&2
     exit 1
 fi
 
-exec /usr/bin/python3 "$package/installer.py" refresh
+exec /usr/bin/python3 "$package/refresh.py"

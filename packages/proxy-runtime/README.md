@@ -63,7 +63,9 @@ Run `proxy test` before applying controller changes. Then restart the monitor wi
 
 Logs: `journalctl --user -u proxy-endpoint -u proxy-direct -u proxy-monitor`.
 
-Installation and removal are documented in the installer package. Use its `./uninstall.sh` workflow; historical development rollback commands are not included.
+Installation is performed by the base image during onboarding. This runtime
+package contains no installation or removal tooling. The image removes its
+bootstrap after successful setup; contact the image maintainer for repair.
 
 
 VPN-off and WSL restart acceptance remain pending. The GitHub CLI signing key was updated on 7 September 2026; full system APT update now passes. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and verification boundary.
