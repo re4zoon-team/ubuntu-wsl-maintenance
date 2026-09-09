@@ -195,6 +195,13 @@ registered developer, so user execution does not depend on an interactive login.
 
 - `scripts/proxy-refresh.py`: refresh the required proxy for the registered user.
 - `scripts/docker-cleaner.py`: seven-day Docker cleanup, **disabled by default**.
+- `scripts/desktop-shortcut.py`: user-only, once-per-version Windows desktop
+  shortcut delivery with the supplied green icon. Windows interop must be enabled;
+  the script detects the actual distro name (including custom import names).
+- `scripts/placeholder-cron.py`: harmless once-a-minute test task; replaces
+  `~/.local/state/company-maintenance/placeholder-last-run.yaml`, with no growing
+  log and no cleanup/destructive behavior.
+- `files/company-maintenance.ico`: custom icon distributed before shortcut creation.
 - `packages/proxy-runtime`: Python controller, configuration, service units, and refresh code.
 - `tests`: isolated repository-only checks, never installed in the image.
 
@@ -216,8 +223,7 @@ executes tasks with Ubuntu's system Python.
 Release only when explicitly approved. Use a new matching stable SemVer tag;
 never move or reuse a tag. Normal clients reject component downgrades; explicit
 preview and replay-all commands are the exceptions described above. A moved
-cached tag is rejected. The working manifest is prepared for 0.7.0; no tag is
-created by editing it.
+cached tag is rejected. Editing the manifest does not itself publish a tag.
 
 This is a privileged deployment channel: protect reviews and tag permissions,
 keep credentials out of the repository, and leave destructive tasks disabled

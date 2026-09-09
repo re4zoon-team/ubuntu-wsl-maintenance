@@ -1,6 +1,6 @@
 $schema: './maintenance.schema.yaml'
 schemaVersion: 1
-version: '0.7.0'
+version: '0.7.1'
 packages:
   -
     id: 'proxy-runtime'
@@ -33,3 +33,26 @@ tasks:
     schedule:
       onBoot: false
       onCalendar: 'Sun *-*-* 04:00:00'
+  -
+    id: maintenance-desktop
+    version: '1.0.0'
+    mode: once
+    description: Install the maintenance-delivered Windows desktop shortcut and custom icon.
+    enabled: true
+    runAs: user
+    script: scripts/desktop-shortcut.py
+    timeoutSeconds: 120
+    files:
+      - source: files/company-maintenance.ico
+        target: ~/.local/share/company-dev/maintenance.ico
+        chmod: '0644'
+  -
+    id: placeholder-cron
+    version: '1.0.0'
+    mode: cron
+    description: Harmless end-to-end placeholder that replaces a per-user last-run record.
+    enabled: true
+    runAs: user
+    script: scripts/placeholder-cron.py
+    timeoutSeconds: 30
+    cron: '* * * * *'
