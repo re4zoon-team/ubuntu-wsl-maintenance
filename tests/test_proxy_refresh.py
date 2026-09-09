@@ -22,7 +22,9 @@ class RefreshTests(unittest.TestCase):
         self.home = Path(self.temp.name)
         with patch.object(Path, 'home', return_value=self.home):
             self.runtime = module.Runtime(PACKAGE)
-        self.runtime.fake_system = True
+        uid = patch.object(module.os, 'geteuid', return_value=1000)
+        uid.start()
+        self.addCleanup(uid.stop)
         shutil.copytree(PACKAGE, self.runtime.root)
         (self.runtime.root / 'old-marker').write_text('previous runtime')
         (self.runtime.root / 'config/proxy.yaml').write_text('upstream_host: custom.example\nupstream_port: 8080\n')
@@ -32,10 +34,23 @@ class RefreshTests(unittest.TestCase):
         self.runtime.ctl = lambda *args, **kwargs: None
 
     def test_runtime_only_refresh_preserves_configuration(self):
-        self.runtime.refresh()
+        self.runtime.refresh('1.0.0')
         self.assertFalse((self.runtime.root / 'old-marker').exists())
         self.assertIn('custom.example', (self.runtime.root / 'config/proxy.yaml').read_text())
         self.assertFalse((self.runtime.root / 'installer.py').exists())
+        self.assertFalse((self.runtime.root / 'tests').exists())
+        self.assertFalse((self.runtime.root / 'logs').exists())
+        self.assertFalse((self.runtime.root / 'refresh.py').exists())
+
+    def test_invalid_python_leaves_old_runtime_and_cleans_stage(self):
+        package = self.home / 'invalid-package'
+        shutil.copytree(PACKAGE, package)
+        (package / 'proxy').write_text('invalid python syntax !!!')
+        self.runtime.package = package
+        with self.assertRaises(SyntaxError):
+            self.runtime.refresh('1.0.0')
+        self.assertTrue((self.runtime.root / 'old-marker').exists())
+        self.assertEqual(list(self.runtime.root.parent.glob('.wsl-proxy-refresh-*')), [])
 
     def test_failed_restart_restores_previous_runtime(self):
         def ctl(*args, **kwargs):
@@ -43,13 +58,32 @@ class RefreshTests(unittest.TestCase):
                 raise subprocess.CalledProcessError(1, 'systemctl')
         self.runtime.ctl = ctl
         with self.assertRaises(subprocess.CalledProcessError):
-            self.runtime.refresh()
+            self.runtime.refresh('1.0.0')
         self.assertTrue((self.runtime.root / 'old-marker').exists())
 
     def test_missing_installation_defers(self):
         self.runtime.manifest_path.unlink()
-        self.runtime.refresh()
+        self.runtime.refresh('1.0.0')
         self.assertTrue((self.runtime.root / 'old-marker').exists())
+
+    def test_unchanged_version_does_not_restart_services(self):
+        self.runtime.refresh('1.0.0')
+        calls = []
+        self.runtime.ctl = lambda *args, **kwargs: calls.append(args)
+        self.runtime.refresh('1.0.0')
+        self.assertEqual(calls, [])
+        with self.assertRaises(RuntimeError):
+            self.runtime.refresh('0.9.0')
+
+    def test_failed_new_version_keeps_installed_version(self):
+        self.runtime.refresh('1.0.0')
+        def ctl(*args, **kwargs):
+            if args[0] == 'restart' and kwargs.get('check', True):
+                raise subprocess.CalledProcessError(1, 'systemctl')
+        self.runtime.ctl = ctl
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.runtime.refresh('1.1.0')
+        self.assertIn('1.0.0', (self.runtime.root / 'managed-version.yaml').read_text())
 
 
 if __name__ == '__main__':

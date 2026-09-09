@@ -1,6 +1,5 @@
 """Validated upstream settings shared by installation and the controller."""
 import re
-import sys
 
 import yaml
 
@@ -15,10 +14,3 @@ def load_settings(path):
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('upstream_port must be an integer from 1 to 65535')
     return host, port
-
-if __name__ == '__main__':
-    try:
-        print(*load_settings(sys.argv[1]))
-    except (OSError, ValueError) as exc:
-        print('Invalid proxy configuration: ' + str(exc), file=sys.stderr)
-        raise SystemExit(1)

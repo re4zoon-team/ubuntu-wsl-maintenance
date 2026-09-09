@@ -1,37 +1,32 @@
 $schema: './maintenance.schema.yaml'
 schemaVersion: 1
-version: '0.5.0'
+version: '0.6.0'
 packages:
   -
     id: 'proxy-runtime'
+    version: '1.0.0'
     path: 'packages/proxy-runtime'
 tasks:
   -
     id: 'proxy-installer-refresh'
+    version: '1.0.0'
+    dependsOn: ['proxy-runtime']
     description: 'Refresh and enforce the required per-user proxy installation from the reviewed package.'
     enabled: true
     runAs: 'user'
-    script: 'scripts/proxy-installer-refresh.sh'
+    script: 'scripts/proxy-refresh.py'
     timeoutSeconds: 600
     schedule:
       onBoot: true
       onCalendar: 'daily'
   -
-    id: 'health-report'
-    description: 'Record a compact developer tool and WSL health report.'
-    enabled: true
-    runAs: 'user'
-    script: 'scripts/health-report.sh'
-    timeoutSeconds: 120
-    schedule:
-      onBoot: true
-      onCalendar: 'daily'
-  -
     id: 'docker-cleaner'
+    version: '1.0.0'
+    dependsOn: []
     description: 'Prune unused Docker resources older than seven days.'
     enabled: false
     runAs: 'root'
-    script: 'scripts/docker-cleaner.sh'
+    script: 'scripts/docker-cleaner.py'
     timeoutSeconds: 1800
     schedule:
       onBoot: false

@@ -1,76 +1,73 @@
-# Ubuntu WSL maintenance releases
+# WSL maintenance
 
-This public repository is the reviewed maintenance channel for deployed company
-Ubuntu WSL instances. The base image checks it on every WSL boot and every 24
-hours. It selects the highest stable `vMAJOR.MINOR.PATCH` tag, validates
-`maintenance.yaml` and every referenced Bash script, and generates systemd units
-that run explicitly as either `root` or the registered WSL user.
+This public repository supplies reviewed scripts and the proxy runtime for company
+WSL images. `maintenance.yaml` declares stable task IDs, Python script paths,
+root/user execution, timeouts, and boot/calendar schedules.
 
-## Trust boundary
+The image's Python maintenance agent reads YAML directly, selects the highest
+stable SemVer tag, validates paths and scripts, and generates systemd services.
+It retains the current/previous release and any older release still referenced by
+an independently installed component. No repository authentication is needed.
 
-A newer tag can deploy code to every connected WSL instance and tasks may run as
-root. Treat release permission as production infrastructure access:
+## Individual versions
 
-- require pull requests and at least two reviewers on `main`
-- restrict tag creation and deletion to a small maintainer group
-- never move or reuse a published SemVer tag
-- run secret scanning and shell/static analysis in CI
-- test releases in a disposable WSL instance before tagging
-- keep destructive tasks disabled until their behavior is approved
+The repository tag is a delivery index, not the version of every component.
+Every task and package has its own required SemVer `version`. Bump only the items
+you change; changing code, settings, or schedules without bumping that item's
+version is rejected. Component downgrades are rejected too.
 
-The repository is public so clients need no credentials. Public visibility does
-not make the channel safe by itself; GitHub organization security and release
-governance are part of the control boundary.
+Tasks declare package IDs in `dependsOn`. A package change updates only dependent
+tasks. Each task runs from an immutable snapshot containing its script and exact
+declared package versions. An unrelated repository release does not restart its
+services. Scheduled jobs still run on their normal schedules.
 
-## Manifest
+For example, bump `packages[id=proxy-runtime].version` to deploy a controller
+change, without changing the Docker cleaner version. Bump the cleaner's own
+version when its script or schedule changes. Keep it disabled unless cleanup is approved.
 
-`maintenance.yaml` is the task and package registry. Each task declares:
+`/var/lib/company-maintenance/components.yaml` records configured task versions,
+available package versions, and immutable version/content hashes. It does not
+claim a scheduled job succeeded; execution status remains in systemd/journald.
+The proxy additionally records its successfully activated package version in
+`~/.local/share/wsl-proxy/managed-version.yaml` and skips redundant reinstall/restarts.
 
-- a stable lowercase `id`
-- whether it is enabled
-- `runAs`: `root` or `user`
-- a relative Bash script below `scripts/`
-- an execution timeout
-- `onBoot`, an optional systemd `onCalendar`, or both
+Omitting an item preserves it. Explicitly remove a managed job with:
 
-Raw cron files, arbitrary unit files, symlinks, commands outside `scripts/`, and
-pre-release tags are not ingested.
+```yaml
+remove:
+  tasks: [docker-cleaner]
+```
 
-The `packages` section permits reviewed, symlink-free file trees below
-`packages/` to travel with the same immutable SemVer release. The bundled
-`proxy-runtime` package is refreshed once per boot and daily as the registered
-WSL user. Refreshing preserves the developer's selected upstream proxy settings
-and performs an atomic rollback if the updated controller fails its checks. If
-onboarding has not installed the proxy yet, the refresh exits successfully and
-defers to the mandatory onboarding step. Once onboarding is complete, a missing
-proxy installation is an error. This repository ships no installer or uninstaller;
-the dedicated runtime refresher preserves settings and rolls back failed updates.
-The controller self-test remains because updates run it before activation.
+Package removal uses `remove.packages` and is rejected while a retained task
+depends on it. Removing a task unschedules it; it does not uninstall software or
+delete developer data. A failed task reconfiguration restores that task's prior
+units, while independent successful updates remain applied and retries skip them.
 
-## Publish a release
+## Contents
 
-1. Update scripts and the manifest through a reviewed pull request.
-2. Set `version` in `maintenance.yaml` to the next SemVer value.
-3. Validate locally:
+- `scripts/proxy-refresh.py`: refresh the required proxy for the registered user.
+- `scripts/docker-cleaner.py`: seven-day Docker cleanup, **disabled by default**.
+- `packages/proxy-runtime`: Python controller, configuration, service units, and refresh code.
+- `tests`: isolated repository-only checks, never installed in the image.
 
-   ```bash
-   python3 -c "import yaml; yaml.safe_load(open('maintenance.yaml'))"
-   bash -n scripts/*.sh
-   ```
+Proxy updates preserve upstream settings and restore the previous runtime after a
+failed activation. Before onboarding they defer; a missing installation after
+onboarding is an error. Bash and Zsh consume generated proxy exports, not Python code.
 
-4. Merge the reviewed commit and create an immutable matching tag:
+## Validate
 
-   ```bash
-   git tag -a v0.5.0 -m "WSL maintenance v0.5.0"
-   git push origin v0.5.0
-   ```
+Run `python3 -B -m unittest discover -s tests -v` with system Python and PyYAML.
+Test VPN transitions, Docker connectivity, and WSL restart in a disposable image
+before approving a release.
 
-Deployed clients never downgrade and never refetch a version they have already
-installed. Publish a new tag for every change.
+## Releases
 
-## VPN connector example
+Maintenance tasks must be Python files. The agent rejects Bash task paths and
+executes tasks with Ubuntu's system Python.
 
-Add the connector below `scripts/`, make it idempotent and non-interactive, then
-register it in the manifest. Use `runAs: root` only for the small privileged
-portion. Keep credentials outside this repository and fetch them at runtime from
-an approved secret or identity system.
+Release only when explicitly approved. Use a new matching stable SemVer tag;
+never move or reuse a tag. Clients do not downgrade or refetch installed versions.
+
+This is a privileged deployment channel: protect reviews and tag permissions,
+keep credentials out of the repository, and leave destructive tasks disabled
+until their behavior is approved.

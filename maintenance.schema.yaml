@@ -8,6 +8,22 @@ required:
   - 'version'
   - 'tasks'
 properties:
+  remove:
+    type: 'object'
+    additionalProperties: false
+    properties:
+      tasks:
+        type: 'array'
+        uniqueItems: true
+        items:
+          type: 'string'
+          pattern: '^[a-z][a-z0-9-]{1,47}$'
+      packages:
+        type: 'array'
+        uniqueItems: true
+        items:
+          type: 'string'
+          pattern: '^[a-z][a-z0-9-]{1,47}$'
   $schema:
     type: 'string'
   schemaVersion:
@@ -23,8 +39,12 @@ properties:
       additionalProperties: false
       required:
         - 'id'
+        - 'version'
         - 'path'
       properties:
+        version:
+          type: 'string'
+          pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
         id:
           type: 'string'
           pattern: '^[a-z][a-z0-9-]{1,47}$'
@@ -38,6 +58,7 @@ properties:
       additionalProperties: false
       required:
         - 'id'
+        - 'version'
         - 'description'
         - 'enabled'
         - 'runAs'
@@ -45,6 +66,15 @@ properties:
         - 'timeoutSeconds'
         - 'schedule'
       properties:
+        version:
+          type: 'string'
+          pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+        dependsOn:
+          type: 'array'
+          uniqueItems: true
+          items:
+            type: 'string'
+            pattern: '^[a-z][a-z0-9-]{1,47}$'
         id:
           type: 'string'
           pattern: '^[a-z][a-z0-9-]{1,47}$'
@@ -59,7 +89,7 @@ properties:
             - 'user'
         script:
           type: 'string'
-          pattern: '^scripts/[A-Za-z0-9._/-]+\.sh$'
+          pattern: '^scripts/[A-Za-z0-9._/-]+\.py$'
         timeoutSeconds:
           type: 'integer'
           minimum: 1
