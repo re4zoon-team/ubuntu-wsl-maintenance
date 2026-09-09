@@ -1,6 +1,6 @@
 $schema: './maintenance.schema.yaml'
 schemaVersion: 1
-version: '0.6.0'
+version: '0.7.0'
 packages:
   -
     id: 'proxy-runtime'
@@ -9,7 +9,8 @@ packages:
 tasks:
   -
     id: 'proxy-installer-refresh'
-    version: '1.0.0'
+    version: '1.1.0'
+    mode: systemd
     dependsOn: ['proxy-runtime']
     description: 'Refresh and enforce the required per-user proxy installation from the reviewed package.'
     enabled: true
@@ -21,7 +22,8 @@ tasks:
       onCalendar: 'daily'
   -
     id: 'docker-cleaner'
-    version: '1.0.0'
+    version: '1.1.0'
+    mode: systemd
     dependsOn: []
     description: 'Prune unused Docker resources older than seven days.'
     enabled: false

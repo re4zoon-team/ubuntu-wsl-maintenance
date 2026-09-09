@@ -62,10 +62,63 @@ properties:
         - 'description'
         - 'enabled'
         - 'runAs'
-        - 'script'
-        - 'timeoutSeconds'
-        - 'schedule'
+        - 'mode'
+      allOf:
+        - if:
+            properties:
+              mode: {const: files}
+          then:
+            required: [files]
+            not:
+              anyOf:
+                - required: [script]
+                - required: [timeoutSeconds]
+          else:
+            required: [script, timeoutSeconds]
+        - if:
+            properties:
+              mode: {const: cron}
+          then:
+            required: [cron]
+          else:
+            not: {required: [cron]}
+        - if:
+            properties:
+              mode: {const: systemd}
+          then:
+            required: [schedule]
+          else:
+            not:
+              anyOf:
+                - required: [schedule]
+                - required: [serviceType]
       properties:
+        mode:
+          enum: [files, once, cron, systemd]
+        serviceType:
+          enum: [oneshot, simple]
+        cron:
+          type: string
+          description: Five numeric cron fields; lists, ranges, and steps are supported.
+          pattern: '^[0-9*,/-]+( +[0-9*,/-]+){4}$'
+        files:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [source, target, chmod]
+            properties:
+              source:
+                type: string
+                pattern: '^files/[A-Za-z0-9._/-]+$'
+              target:
+                type: string
+                description: Absolute path for root; ~/relative-path for the registered user.
+                pattern: '^(/|~/)[A-Za-z0-9._/-]+$'
+              chmod:
+                type: string
+                pattern: '^0[0-7]{3}$'
         version:
           type: 'string'
           pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
@@ -99,7 +152,6 @@ properties:
           additionalProperties: false
           required:
             - 'onBoot'
-            - 'onCalendar'
           properties:
             onBoot:
               type: 'boolean'
